@@ -44,7 +44,7 @@ jobs:
 
 
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.omdalvi07 }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Step 6: Build the Docker image and push it to the Docker Hub registry
