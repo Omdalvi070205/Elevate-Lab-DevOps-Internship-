@@ -11,13 +11,11 @@ WORKDIR /app
 
 # --- Copy Dependency Information ---
 # This copies your package.json and package-lock.json files into the container.
-# We do this separately from the rest of the code to take advantage of Docker's caching.
-# If these files don't change, Docker won't re-download the dependencies on future builds.
+# This is done first to leverage Docker's layer caching.
 COPY package*.json ./
 
 # --- Install Dependencies ---
-# This runs the 'npm install' command inside the container,
-# downloading all the libraries listed in your package.json.
+# This runs the 'npm install' command inside the container.
 RUN npm install
 
 # --- Copy Application Code ---
@@ -27,10 +25,9 @@ COPY . .
 
 # --- Expose Port ---
 # This tells Docker that the application inside the container will be listening
-# for traffic on port 3000. It doesn't open the port, just documents it.
+# for traffic on port 3000.
 EXPOSE 3000
 
 # --- Define Startup Command ---
 # This is the command that will be executed when the container starts.
-# It's the equivalent of you typing 'npm start' in your terminal.
 CMD [ "npm", "start" ]
