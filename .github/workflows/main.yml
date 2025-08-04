@@ -50,7 +50,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./interactive-report-app # <-- **** CHANGE THIS ****
-          file: ./interactive-report-app/Dockerfile # <-- **** AND THIS ****
+          context: ./Elevate-Lab-DevOps-Internship-/interactive-report-app# <-- **** CHANGE THIS ****
+          file: ./Elevate-Lab-DevOps-Internship-/interactive-report-app/Dockerfile # <-- **** AND THIS ****
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/interactive-report:latest
