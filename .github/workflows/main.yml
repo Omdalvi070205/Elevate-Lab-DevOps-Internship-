@@ -25,7 +25,7 @@ jobs:
           node-version: '18'
 
       # Step 3: Install dependencies and run tests
-      # We added 'working-directory' to tell npm where to find package.json
+      # Changed the working directory to match your new folder name.
       - name: Install dependencies & Run Tests
         working-directory: ./interactive-report-app # <-- Changed to your subfolder name
         run: |
@@ -46,7 +46,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Step 6: Build the Docker image and push it to the Docker Hub registry
-      # We updated 'context' and 'file' to point to your app's subfolder
+      # Updated the context and file paths to match your new folder name.
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
