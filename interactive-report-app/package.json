@@ -1,11 +1,11 @@
 {
   "name": "interactive-report-app",
   "version": "1.0.0",
-  "description": "A Node.js server to host the interactive data science report.",
+  "description": "A Node.js application to serve an interactive data science report.",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "echo \"No tests specified\" && exit 0"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
