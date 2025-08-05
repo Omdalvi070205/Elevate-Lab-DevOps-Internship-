@@ -1,0 +1,107 @@
+// This Jenkinsfile is updated to work when the project code
+// is located in a subdirectory within the Git repository.
+
+pipeline {
+    agent {
+        docker {
+            image 'cibuilds/aws:2'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
+
+    environment {
+        // The AWS region for your ECR repository and EC2 deployment server.
+        AWS_REGION         = 'us-east-1' // CORRECTED: Use the region, not the AZ
+        // Your 12-digit AWS Account ID.
+        AWS_ACCOUNT_ID     = '396608773188'
+        // The name of your application's ECR repository.
+        ECR_REPOSITORY_NAME= 'interactive-report-app'
+        // The IP address or public DNS name of the EC2 instance for deployment.
+        DEPLOY_SERVER_IP   = '54.234.119.183'
+        // The ID of the SSH credentials stored in Jenkins for the deployment server.
+        SSH_CREDENTIALS_ID = 'deploy_key'
+        // The full URI for your ECR repository.
+        ECR_REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code from Git...'
+                checkout scm
+            }
+        }
+
+        // --- MODIFIED STAGE ---
+        stage('Build Docker Image') {
+            steps {
+                // This 'dir' step tells Jenkins to change into the subdirectory
+                // before executing the commands inside this block.
+                dir('interactive-report-app') {
+                    script {
+                        echo "Building Docker image from within the 'interactive-report-app' directory..."
+                        // The '.' path now correctly refers to the subdirectory
+                        // where the Dockerfile is located.
+                        docker.build("${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}", ".")
+                    }
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                script {
+                    echo "Pushing image to Amazon ECR: ${ECR_REPOSITORY_URI}"
+                    docker.withRegistry("https://${ECR_REPOSITORY_URI}", "ecr:${AWS_REGION}:") {
+                        def img = docker.image("${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}")
+                        img.push()
+                        img.push('latest')
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            steps {
+                script {
+                    echo "Deploying container to server at ${DEPLOY_SERVER_IP}"
+                    withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CREDENTIALS_ID}", keyFileVariable: 'SSH_KEY')]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -i \${SSH_KEY} ec2-user@${DEPLOY_SERVER_IP} '
+                                echo "Logging into ECR on deployment server..."
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+                                echo "Pulling latest image from ECR..."
+                                docker pull ${ECR_REPOSITORY_URI}:latest
+
+                                echo "Stopping and removing old container..."
+                                docker stop ${ECR_REPOSITORY_NAME} || true
+                                docker rm ${ECR_REPOSITORY_NAME} || true
+
+                                # CORRECTED: The internal port is 3000, not 8080.
+                                echo "Starting new container..."
+                                docker run -d --name ${ECR_REPOSITORY_NAME} -p 80:3000 --restart always ${ECR_REPOSITORY_URI}:latest
+
+                                echo "Cleaning up old Docker images..."
+                                docker image prune -a -f
+                            '
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished. Cleaning up the Jenkins workspace."
+            cleanWs()
+        }
+        success {
+            echo "Pipeline succeeded!"
+        }
+        failure {
+            echo "Pipeline failed!"
+        }
+    }
+}
