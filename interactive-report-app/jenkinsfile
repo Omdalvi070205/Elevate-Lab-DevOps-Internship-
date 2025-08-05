@@ -1,29 +1,18 @@
-// This Jenkinsfile defines a robust CI/CD pipeline for deploying a Dockerized
-// application on AWS. It follows best practices by using declarative pipeline
-// syntax, environment variables, and secure credential management.
+// This Jenkinsfile is updated to work when the project code
+// is located in a subdirectory within the Git repository.
 
 pipeline {
-    // --- AGENT CONFIGURATION ---
-    // The pipeline will execute inside a Docker container. This ensures a clean,
-    // consistent build environment with all necessary tools pre-installed.
     agent {
         docker {
-            // A public image containing Docker client, AWS CLI, git, and other tools.
             image 'cibuilds/aws:2'
-            // Mount the host's Docker socket into the container. This allows the
-            // containerized Jenkins agent to execute Docker commands (build, push)
-            // on the host machine.
             args '-v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
-    // --- ENVIRONMENT VARIABLES ---
-    // Centralizing configuration here makes the pipeline easy to read and manage.
-    // Replace these placeholder values with your actual AWS details.
     environment {
         // The AWS region for your ECR repository and EC2 deployment server.
-        AWS_REGION         = 'us-east-1d' // Example: Mumbai region
-        // Your 12-digit AWS Account ID. Find this in the AWS console under your account name.
+        AWS_REGION         = 'us-east-1' // CORRECTED: Use the region, not the AZ
+        // Your 12-digit AWS Account ID.
         AWS_ACCOUNT_ID     = '396608773188'
         // The name of your application's ECR repository.
         ECR_REPOSITORY_NAME= 'interactive-report-app'
@@ -31,16 +20,11 @@ pipeline {
         DEPLOY_SERVER_IP   = '54.234.119.183'
         // The ID of the SSH credentials stored in Jenkins for the deployment server.
         SSH_CREDENTIALS_ID = 'deploy_key'
-        // The full URI for your ECR repository. This is constructed dynamically.
+        // The full URI for your ECR repository.
         ECR_REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}"
     }
 
-    // --- PIPELINE STAGES ---
-    // The pipeline is broken down into logical stages.
     stages {
-
-        // Stage 1: Checkout Source Code
-        // Clones the code from the Git repository configured in the Jenkins job.
         stage('Checkout') {
             steps {
                 echo 'Checking out source code from Git...'
@@ -48,77 +32,56 @@ pipeline {
             }
         }
 
-        // Stage 2: Build Docker Image
-        // Builds the Docker image using the 'Dockerfile' in your repository.
+        // --- MODIFIED STAGE ---
         stage('Build Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image: ${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}"
-                    // The image is tagged with the unique Jenkins BUILD_NUMBER for versioning.
-                    docker.build("${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}", ".")
+                // This 'dir' step tells Jenkins to change into the subdirectory
+                // before executing the commands inside this block.
+                dir('interactive-report-app') {
+                    script {
+                        echo "Building Docker image from within the 'interactive-report-app' directory..."
+                        // The '.' path now correctly refers to the subdirectory
+                        // where the Dockerfile is located.
+                        docker.build("${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}", ".")
+                    }
                 }
             }
         }
 
-        // Stage 3: Push Image to Amazon ECR
-        // Pushes the newly built image to your private AWS container registry.
         stage('Push to ECR') {
             steps {
                 script {
                     echo "Pushing image to Amazon ECR: ${ECR_REPOSITORY_URI}"
-                    // The 'withRegistry' block handles authentication with ECR.
-                    // It uses the IAM Role attached to the Jenkins EC2 instance for credentials.
-                    // The format 'ecr:region:' tells the plugin to use the instance profile.
                     docker.withRegistry("https://${ECR_REPOSITORY_URI}", "ecr:${AWS_REGION}:") {
-                        // Tag the image with the build number and push it.
                         def img = docker.image("${ECR_REPOSITORY_NAME}:${env.BUILD_NUMBER}")
                         img.push()
-
-                        // Also tag the same image as 'latest' and push it. This provides a
-                        // stable tag for the deployment server to pull.
                         img.push('latest')
                     }
                 }
             }
         }
 
-        // Stage 4: Deploy to Production EC2
-        // Connects to the deployment server via SSH and runs the new container.
         stage('Deploy to Production') {
             steps {
                 script {
                     echo "Deploying container to server at ${DEPLOY_SERVER_IP}"
-                    // The 'withCredentials' block securely provides the SSH private key
-                    // to the shell command without exposing it in logs.
                     withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CREDENTIALS_ID}", keyFileVariable: 'SSH_KEY')]) {
-                        // The sh command uses SSH to execute a script on the remote server.
-                        // 'ec2-user' is the standard username for Amazon Linux. Change if needed.
                         sh """
                             ssh -o StrictHostKeyChecking=no -i \${SSH_KEY} ec2-user@${DEPLOY_SERVER_IP} '
-                                # Step A: Log in to ECR on the deployment server.
-                                # The server must have an IAM Role with ECR read permissions.
                                 echo "Logging into ECR on deployment server..."
                                 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
-                                # Step B: Pull the latest version of the image from ECR.
                                 echo "Pulling latest image from ECR..."
                                 docker pull ${ECR_REPOSITORY_URI}:latest
 
-                                # Step C: Stop and remove the old running container (if it exists).
-                                # '|| true' ensures the command doesn't fail if the container isn't running.
                                 echo "Stopping and removing old container..."
                                 docker stop ${ECR_REPOSITORY_NAME} || true
                                 docker rm ${ECR_REPOSITORY_NAME} || true
 
-                                # Step D: Run the new container with the 'latest' image.
-                                # -d: run in detached (background) mode.
-                                # --name: assign a name for easy reference.
-                                # -p 80:8080: map port 80 on the host to port 8080 in the container. Adjust as needed.
-                                # --restart always: ensures the container restarts automatically if it crashes or the server reboots.
+                                # CORRECTED: The internal port is 3000, not 8080.
                                 echo "Starting new container..."
-                                docker run -d --name ${ECR_REPOSITORY_NAME} -p 80:8080 --restart always ${ECR_REPOSITORY_URI}:latest
+                                docker run -d --name ${ECR_REPOSITORY_NAME} -p 80:3000 --restart always ${ECR_REPOSITORY_URI}:latest
 
-                                # Step E: Clean up old, unused Docker images to save disk space.
                                 echo "Cleaning up old Docker images..."
                                 docker image prune -a -f
                             '
@@ -129,23 +92,16 @@ pipeline {
         }
     }
 
-    // --- POST-BUILD ACTIONS ---
-    // This block defines actions that run at the end of the pipeline.
     post {
-        // 'always' runs regardless of whether the pipeline succeeded or failed.
         always {
             echo "Pipeline finished. Cleaning up the Jenkins workspace."
-            // Deletes all files from the workspace to ensure a clean start for the next build.
             cleanWs()
         }
         success {
             echo "Pipeline succeeded!"
-            // You could add success notifications here (e.g., Slack, email).
         }
         failure {
             echo "Pipeline failed!"
-            // You could add failure notifications here.
         }
     }
 }
-
